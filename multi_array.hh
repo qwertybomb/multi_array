@@ -10,17 +10,20 @@
 
 
 namespace turtle {
-    template<typename T, std::size_t N, bool Opt = false>
-    class multi_array {
+    namespace detail {
         /* a struct for holding the array sizes*/
         template<std::size_t SizeCount>
         struct size_list {
             std::size_t data[SizeCount];
         };
+    }
+    template<typename T, std::size_t N, bool Opt = false>
+    class multi_array {
         //allow different template instances to access private members of other template instances
         template<class A, std::size_t B, bool C>
         friend
         class multi_array;
+
     public:
         using value_type             = T;
         using pointer                = T *;
@@ -37,32 +40,43 @@ namespace turtle {
 
         multi_array() = default;
 
-        template<typename Size, typename... Sizes, std::enable_if_t<sizeof...(Sizes)<N,int> = 0>
+        template<typename Size, typename... Sizes, std::enable_if_t<sizeof...(Sizes) < N, int> = 0>
         explicit multi_array(const Size &size, const Sizes &... sizes) {
             resize_data(size, sizes...);
         }
-       multi_array& operator=(const std::initializer_list<T>& list) {
-            if constexpr (Opt) {
-                //clear array
-                std::fill(begin(),end(),T());
-                std::copy(list.begin(),list.end(),begin());
-                return *this;
+
+        multi_array(const multi_array<T, N, !Opt> &other)
+                : sizes_(other.sizes_),
+                  size_(other.size_) {
+            if constexpr(Opt) {
+                data_ = other.begin();
             } else {
-                static_assert(Opt,"Parent array cannot be set to initializer_list");
+                data_ = std::vector<T>(other.begin(), other.end());
             }
         }
-      
+
+        multi_array &operator=(const std::initializer_list<T> &list) {
+            if constexpr (Opt) {
+                //clear array
+                std::fill(begin(), end(), T());
+                std::copy(list.begin(), list.end(), begin());
+                return *this;
+            } else {
+                static_assert(Opt, "Parent array cannot be set to initializer_list");
+            }
+        }
+
         /*Element access*/
         reference at(const size_type &index) { return data_[index]; }
 
         const_reference at(const size_type &index) const { return (*this)[index]; }
 
-        template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices)<N,int> = 0>
+        template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices) < N, int> = 0>
         reference operator()(const Index &index, const Indices &... indices) {
             return data_[this->index(index, indices...)];
         }
 
-        template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices)<N,int> = 0>
+        template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices) < N, int> = 0>
         const_reference operator()(const Index &index, const Indices &... indices) const {
             return data_[this->index(index, indices...)];
         }
@@ -81,9 +95,9 @@ namespace turtle {
             }
         }
 
-        reference front() { return *begin(); }
+        reference front() { return data_[0]; }
 
-        const_reference front() const { return front(); }
+        const_reference front() const { return data_[0]; }
 
         reference back() { return *(end() - 1); }
 
@@ -99,9 +113,9 @@ namespace turtle {
 
         iterator end() noexcept { return &data_[0] + size_; }
 
-        iterator begin() const noexcept { return begin(); }
+        iterator begin() const noexcept { return &data_[0]; }
 
-        iterator end() const noexcept { return end(); }
+        iterator end() const noexcept { return &data_[0] + size_; }
 
         iterator cbegin() const noexcept { return begin(); }
 
@@ -111,31 +125,27 @@ namespace turtle {
 
         reverse_iterator rend() noexcept { return reverse_iterator(end()); }
 
-        reverse_iterator rbegin() const noexcept { return rbegin(); }
-
-        reverse_iterator rend() const noexcept { return rend(); }
-
-        reverse_iterator crbegin() const noexcept { return rbegin(); }
-
-        reverse_iterator crend() const noexcept { return rend(); }
         //Capacity
-        template<typename Size, typename... Sizes, std::enable_if_t<sizeof...(Sizes)<N,int> = 0>
-        void resize(const Size& size, const Sizes&... sizes) {
-            resize_data(size,sizes...);
+        template<typename Size, typename... Sizes, std::enable_if_t<sizeof...(Sizes) < N, int> = 0>
+        void resize(const Size &size, const Sizes &... sizes) {
+            resize_data(size, sizes...);
         }
 
-        [[nodiscard]] bool empty() const noexcept { return !size_;}
-        size_type  size() const noexcept { return size_;}
-        size_type max_size() const noexcept { return std::numeric_limits<size_type>::max()/sizeof(T);}
+        [[nodiscard]] bool empty() const noexcept { return !size_; }
+
+        size_type size() const noexcept { return size_; }
+
+        size_type max_size() const noexcept { return std::numeric_limits<size_type>::max() / sizeof(T); }
 
         //function for indexing
-        template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices)<N,int> = 0>
+        template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices) < N, int> = 0>
         size_t index(const Index &index, const Indices &... indices) const {
-            return get_index(0,multiply_sizes(0), index, indices...);
+            return get_index(0, multiply_sizes(0), index, indices...);
         }
+
         //Operations
-        void fill(const T& value) {
-            std::fill(begin(),end(),value);
+        void fill(const T &value) {
+            std::fill(begin(), end(), value);
         }
 
         void swap(std::conditional_t<Opt,multi_array,multi_array&> other) noexcept {
@@ -144,14 +154,16 @@ namespace turtle {
             iterator first2 = other.data();
             while (first1 != end()) {
                 std::swap(*first1, *first2);
-                ++first1; ++first2;
+                ++first1;
+                ++first2;
             }
         }
+
     private:
 
         /*store the dimensions for indexing*/
-        size_list<N> sizes_;
-        std::conditional_t<Opt, T *, std::vector<T>> data_;
+        detail::size_list<N> sizes_;
+        mutable std::conditional_t<Opt, T *, std::vector<T>> data_;
         size_type size_ = 0;
 
         template<typename... Sizes>
@@ -169,14 +181,16 @@ namespace turtle {
 
         //helper function for indexing
         template<typename Index, typename ... Indices>
-        std::size_t get_index(const size_type& size_index,const size_type& size, const Index &index, const Indices &... indices) const {
+        std::size_t get_index(const size_type &size_index, const size_type &size, const Index &index,
+                              const Indices &... indices) const {
             //x + y*i + z*i*j + w*i*j*k ...
-            size_type new_index = index * (size/sizes_.data[size_index]);
+            size_type new_index = index * (size / sizes_.data[size_index]);
             if constexpr(sizeof...(indices)) {
-                return get_index(size_index + 1,size/sizes_.data[size_index], indices...) + new_index;
+                return get_index(size_index + 1, size / sizes_.data[size_index], indices...) + new_index;
             }
             return new_index;
         }
+
         template<typename U>
         U &make_reference(U &arg) { return arg; }
     };
