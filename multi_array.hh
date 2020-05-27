@@ -40,19 +40,19 @@ namespace turtle {
 
         multi_array() = default;
 
-        template<typename Size, typename... Sizes, std::enable_if_t<sizeof...(Sizes) < N, int> = 0>
-        explicit multi_array(const Size &size, const Sizes &... sizes) {
+        ~multi_array() { if (data_ && owner_) delete[] data_; }
+
+        template<typename... Sizes, std::enable_if_t<sizeof...(Sizes) < N, int> = 0>
+        explicit multi_array(const size_type &size, const Sizes &... sizes) {
             resize_data(size, sizes...);
         }
 
-        multi_array(const multi_array<T, N, !Opt> &other)
-                : sizes_(other.sizes_),
-                  size_(other.size_) {
-            if constexpr(Opt) {
-                data_ = other.begin();
-            } else {
-                data_ = std::vector<T>(other.begin(), other.end());
-            }
+        template<bool OtherOpt>
+        multi_array(const multi_array<T, N + 1, OtherOpt> &other, size_type pos) {
+            size_ = other.size_ / other.sizes_.data[0];
+            owner_ = false;
+            data_ = (other.data_ + size_ * pos);
+            std::copy(other.sizes_.data + 1, other.sizes_.data + N, sizes_.data);
         }
 
         multi_array &operator=(const std::initializer_list<T> &list) {
@@ -69,55 +69,61 @@ namespace turtle {
         /*Element access*/
         reference at(const size_type &index) { return data_[index]; }
 
-        const_reference at(const size_type &index) const { return (*this)[index]; }
+        const_reference at(const size_type &index) const { return data_[index]; }
 
         template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices) < N, int> = 0>
-        reference operator()(const Index &index, const Indices &... indices) {
-            return data_[this->index(index, indices...)];
+        decltype(auto) operator()(const Index &index, const Indices &... indices) {
+            if constexpr(sizeof...(indices) == N - 1) {
+                return data_[this->index(index, indices...)];
+            } else if constexpr(!sizeof...(indices)) {
+                return multi_array<T, N - 1, true>(*this, index);
+            } else {
+                return multi_array<T, N - 1, true>(*this, index)(indices...);
+            }
         }
 
         template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices) < N, int> = 0>
-        const_reference operator()(const Index &index, const Indices &... indices) const {
-            return data_[this->index(index, indices...)];
-        }
+        decltype(auto) operator()(const Index &index, const Indices &... indices) const {
+            return (*this)(index, indices...);
+        };
 
         decltype(auto) operator[](const size_type &index) {
             if constexpr(N > 1) {
-                auto temp = multi_array<T, N - 1, true>();
-                temp.size_ = size_ / sizes_.data[0];
-                temp.data_ = (begin() + temp.size_ * index);
-                //copy sizes
-                std::copy(sizes_.data + 1, sizes_.data + N, temp.sizes_.data);
+                auto temp = multi_array<T, N - 1, true>(*this, index);
                 return temp;
             } else {
                 //force it to return a reference
-                return make_reference(data_[index]);
+                return data_[index];
             }
+        }
+
+        decltype(auto) operator[](const size_type &index) const {
+            return (*this)[index];
         }
 
         reference front() { return data_[0]; }
 
         const_reference front() const { return data_[0]; }
 
-        reference back() { return *(end() - 1); }
+        reference back() { return data_[size_ - 1]; }
 
-        const_reference back() const { return back(); }
+        const_reference back() const { return data_[size_ - 1]; }
 
-        T *data() noexcept { return &data_[0]; }
+        T *data() noexcept { return data_; }
 
-        const T *data() const noexcept { return data(); }
+        const T *data() const noexcept { return data_; }
 
 
         //Iterators
-        iterator begin() noexcept { return &data_[0]; }
+        iterator begin() noexcept { return data_; }
 
-        iterator end() noexcept { return &data_[0] + size_; }
+        iterator end() noexcept { return data_ + size_; }
 
-        iterator begin() const noexcept { return &data_[0]; }
+        const_iterator begin() const noexcept { return data_; }
 
-        iterator end() const noexcept { return &data_[0] + size_; }
+        const_iterator end() const noexcept { return data_ + size_; }
 
-        iterator cbegin() const noexcept { return begin(); }
+        const_iterator cbegin() const noexcept { return begin(); }
 
         iterator cend() const noexcept { return end(); }
 
@@ -131,7 +137,7 @@ namespace turtle {
             resize_data(size, sizes...);
         }
 
-        [[nodiscard]] bool empty() const noexcept { return !size_; }
+        bool empty() const noexcept { return !size_; }
 
         size_type size() const noexcept { return size_; }
 
@@ -148,28 +154,41 @@ namespace turtle {
             std::fill(begin(), end(), value);
         }
 
-        void swap(std::conditional_t<Opt,multi_array,multi_array&> other) noexcept {
-            /*from swap_ranges*/
-            iterator first1 = data();
-            iterator first2 = other.data();
-            while (first1 != end()) {
-                std::swap(*first1, *first2);
-                ++first1;
-                ++first2;
-            }
-        }
+        //if the arrays have the same Opt
+        template<typename _T, std::size_t _N, bool _Opt>
+        friend void swap(multi_array<_T, _N, _Opt> &lhs, multi_array<_T, _N, _Opt> &rhs) noexcept;
+
+        //if the arrays a different Opt
+        template<typename _T, std::size_t _N, bool _Opt>
+        friend void swap(multi_array<_T, _N, _Opt> &lhs, multi_array<_T, _N, !_Opt> &rhs) noexcept;
+
+        template<typename _T, std::size_t _N, bool _Opt1, bool _Opt2>
+        friend void swap(multi_array<_T, _N, _Opt1> &&lhs, multi_array<_T, _N, _Opt2> &&rhs) noexcept;
+
+        template<typename _T, std::size_t _N, bool _Opt1, bool _Opt2>
+        friend void swap(multi_array<_T, _N, _Opt1> &&lhs, multi_array<_T, _N, _Opt2> &rhs) noexcept;
+
+        template<typename _T, std::size_t _N, bool _Opt1, bool _Opt2>
+        friend void swap(multi_array<_T, _N, _Opt1> &lhs, multi_array<_T, _N, _Opt2> &&rhs) noexcept;
+
+        template<typename _T, std::size_t _N, bool _Opt>
+        void swap(multi_array<_T, _N, _Opt> &&rhs) noexcept;
+
+        template<typename _T, std::size_t _N, bool _Opt>
+        void swap(multi_array<_T, _N, _Opt> &rhs) noexcept;
 
     private:
 
         /*store the dimensions for indexing*/
         detail::size_list<N> sizes_;
-        mutable std::conditional_t<Opt, T *, std::vector<T>> data_;
+        T *data_;
         size_type size_ = 0;
+        bool owner_ = true;
 
         template<typename... Sizes>
         void resize_data(const Sizes &... sizes) {
             sizes_ = {static_cast<size_type>(sizes)...}; //store sizes
-            data_.resize(size_ = (sizes*...)); //use fold expressions to get total size
+            data_ = (new T[size_ = (sizes*...)]); //use fold expressions to get total size
         }
 
         size_type multiply_sizes(size_type pos) const {
@@ -191,9 +210,54 @@ namespace turtle {
             return new_index;
         }
 
-        template<typename U>
-        U &make_reference(U &arg) { return arg; }
     };
+
+    template<typename _T, size_t _N, bool _Opt>
+    void swap(multi_array<_T, _N, _Opt> &lhs, multi_array<_T, _N, _Opt> &rhs) noexcept {
+
+        bool both_owners = !_Opt & lhs.owner_ & rhs.owner_;
+        if (both_owners) {
+            std::swap(lhs.data_, rhs.data_); //both are true owners
+        } else {
+            for (std::size_t i = 0; i < lhs.size_; ++i) {
+                std::swap(lhs.data_[i], rhs.data_[i]); //at least one is not an owner
+            }
+        }
+    }
+
+    template<typename _T, size_t _N, bool _Opt>
+    void swap(multi_array<_T, _N, _Opt> &lhs, multi_array<_T, _N, !_Opt> &rhs) noexcept {
+        for (std::size_t i = 0; i < lhs.size_; ++i) {
+            std::swap(lhs.data_[i], rhs.data_[i]);
+        }
+    }
+
+    template<typename _T, size_t _N, bool _Opt1, bool _Opt2>
+    void swap(multi_array<_T, _N, _Opt1> &&lhs, multi_array<_T, _N, _Opt2> &&rhs) noexcept {
+        swap(lhs, rhs);
+    }
+
+    template<typename _T, size_t _N, bool _Opt1, bool _Opt2>
+    void swap(multi_array<_T, _N, _Opt1> &&lhs, multi_array<_T, _N, _Opt2> &rhs) noexcept {
+        swap(lhs, rhs);
+    }
+
+    template<typename _T, size_t _N, bool _Opt1, bool _Opt2>
+    void swap(multi_array<_T, _N, _Opt1> &lhs, multi_array<_T, _N, _Opt2> &&rhs) noexcept {
+        swap(lhs, rhs);
+    }
+
+    template<typename T, size_t N, bool Opt>
+    template<typename _T, size_t _N, bool _Opt>
+    void multi_array<T, N, Opt>::swap(multi_array<_T, _N, _Opt> &&rhs) noexcept {
+        turtle::swap(*this, rhs);
+    }
+
+    template<typename T, size_t N, bool Opt>
+    template<typename _T, size_t _N, bool _Opt>
+    void multi_array<T, N, Opt>::swap(multi_array<_T, _N, _Opt> &rhs) noexcept {
+        turtle::swap(*this, rhs);
+    }
 }
 
 
