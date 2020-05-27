@@ -7,7 +7,7 @@
 
 #include <memory>
 #include <vector>
-
+#include <cassert>
 
 namespace turtle {
     namespace detail {
@@ -55,6 +55,21 @@ namespace turtle {
             std::copy(other.sizes_.data + 1, other.sizes_.data + N, sizes_.data);
         }
 
+        multi_array(const multi_array<T,N,Opt>& other) : size_(other.size_), sizes_(other.sizes_) {
+            if(other.empty()) { return ;}  //if other is empty don't do anything
+            data_ = new T[size_];
+            std::uninitialized_copy(other.begin(),other.end(),data_); //copy data
+        }
+        multi_array(const multi_array<T,N,!Opt>& other) : size_(other.size_), sizes_(other.sizes_) {
+            if(other.empty()) { return ;}  //if other is empty don't do anything
+            data_ = new T[size_];
+            std::uninitialized_copy(other.begin(),other.end(),data_); //copy data
+        }
+        multi_array &operator=(const multi_array& other) {
+              auto temp = multi_array(other);
+              this->swap(temp);
+              return *this;
+        }
         multi_array &operator=(const std::initializer_list<T> &list) {
             if constexpr (Opt) {
                 //clear array
@@ -89,8 +104,7 @@ namespace turtle {
 
         decltype(auto) operator[](const size_type &index) {
             if constexpr(N > 1) {
-                auto temp = multi_array<T, N - 1, true>(*this, index);
-                return temp;
+                return multi_array<T, N - 1, true> (*this, index);
             } else {
                 //force it to return a reference
                 return data_[index];
@@ -134,6 +148,7 @@ namespace turtle {
         //Capacity
         template<typename Size, typename... Sizes, std::enable_if_t<sizeof...(Sizes) < N, int> = 0>
         void resize(const Size &size, const Sizes &... sizes) {
+            assert(("cannot resize non owner",owner_));
             resize_data(size, sizes...);
         }
 
@@ -215,10 +230,13 @@ namespace turtle {
     template<typename _T, size_t _N, bool _Opt>
     void swap(multi_array<_T, _N, _Opt> &lhs, multi_array<_T, _N, _Opt> &rhs) noexcept {
 
-        bool both_owners = !_Opt & lhs.owner_ & rhs.owner_;
+        bool both_owners = !_Opt && lhs.owner_ && rhs.owner_;
         if (both_owners) {
             std::swap(lhs.data_, rhs.data_); //both are true owners
+            std::swap(lhs.size_,rhs.size_);
+            std::swap(lhs.sizes_,rhs.sizes_);
         } else {
+            assert(("array sizes must be the same",other.size() == size_));
             for (std::size_t i = 0; i < lhs.size_; ++i) {
                 std::swap(lhs.data_[i], rhs.data_[i]); //at least one is not an owner
             }
@@ -227,6 +245,7 @@ namespace turtle {
 
     template<typename _T, size_t _N, bool _Opt>
     void swap(multi_array<_T, _N, _Opt> &lhs, multi_array<_T, _N, !_Opt> &rhs) noexcept {
+        assert(("array sizes must be the same",other.size() == size_));
         for (std::size_t i = 0; i < lhs.size_; ++i) {
             std::swap(lhs.data_[i], rhs.data_[i]);
         }
