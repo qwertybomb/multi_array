@@ -7,8 +7,8 @@
 
 #include <memory>
 #include <vector>
+#include <array>
 #include <cassert>
-
 namespace turtle {
     namespace detail {
         /* a struct for holding the array sizes*/
@@ -89,7 +89,7 @@ namespace turtle {
         template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices) < N, int> = 0>
         decltype(auto) operator()(const Index &index, const Indices &... indices) {
             if constexpr(sizeof...(indices) == N - 1) {
-                return data_[this->index(index, indices...)];
+                return data_[get_index(index, indices...)];
             } else if constexpr(!sizeof...(indices)) {
                 return multi_array<T, N - 1, true>(*this, index);
             } else {
@@ -160,10 +160,14 @@ namespace turtle {
 
         //function for indexing
         template<typename Index, typename ... Indices, std::enable_if_t<sizeof...(Indices) < N, int> = 0>
-        size_t index(const Index &index, const Indices &... indices) const {
-            return get_index(0, multiply_sizes(0), index, indices...);
+        size_t get_index(const Index &index, const Indices &... indices) const {
+            return get_index_helper(0, multiply_sizes(0), index, indices...);
         }
-
+         auto get_indices(const size_type& index) {
+          std::array<size_type,N> to_return;
+          get_indices_helper<0,std::array<size_type,N>>(0,index,1,to_return);
+          return to_return;
+        }
         //Operations
         void fill(const T &value) {
             std::fill(begin(), end(), value);
@@ -215,16 +219,26 @@ namespace turtle {
 
         //helper function for indexing
         template<typename Index, typename ... Indices>
-        std::size_t get_index(const size_type &size_index, const size_type &size, const Index &index,
+        std::size_t get_index_helper(const size_type &size_index, const size_type &size, const Index &index,
                               const Indices &... indices) const {
             //x + y*i + z*i*j + w*i*j*k ...
             size_type new_index = index * (size / sizes_.data[size_index]);
             if constexpr(sizeof...(indices)) {
-                return get_index(size_index + 1, size / sizes_.data[size_index], indices...) + new_index;
+                return get_index_helper(size_index + 1, size / sizes_.data[size_index], indices...) + new_index;
             }
             return new_index;
         }
-
+       //helper function for indexing
+         template<size_type size_index, typename Indices>
+      void get_indices_helper(const size_type& prev,const size_type& index,size_type size, Indices& indices)
+        {
+         size_type new_index =((index-prev)/(size) % sizes_.data[size_index]);
+         size = size*sizes_.data[size_index];
+         indices[(N-1)-size_index] = new_index;
+         if constexpr(size_index < N-1){
+            get_indices_helper<size_index+1,Indices>(new_index,index,size,indices);
+        }
+      }
     };
 
     template<typename _T, size_t _N, bool _Opt>
@@ -236,7 +250,7 @@ namespace turtle {
             std::swap(lhs.size_,rhs.size_);
             std::swap(lhs.sizes_,rhs.sizes_);
         } else {
-            assert(("array sizes must be the same",other.size() == size_));
+            assert(("array sizes must be the same",lhs.size_ == rhs.size_));
             for (std::size_t i = 0; i < lhs.size_; ++i) {
                 std::swap(lhs.data_[i], rhs.data_[i]); //at least one is not an owner
             }
@@ -245,7 +259,7 @@ namespace turtle {
 
     template<typename _T, size_t _N, bool _Opt>
     void swap(multi_array<_T, _N, _Opt> &lhs, multi_array<_T, _N, !_Opt> &rhs) noexcept {
-        assert(("array sizes must be the same",other.size() == size_));
+        assert(("array sizes must be the same",lhs.size_ == rhs.size_));
         for (std::size_t i = 0; i < lhs.size_; ++i) {
             std::swap(lhs.data_[i], rhs.data_[i]);
         }
